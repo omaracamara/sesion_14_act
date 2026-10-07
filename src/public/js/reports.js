@@ -3,7 +3,44 @@ const reportsStatus = document.querySelector('#reports-status');
 const reportFormSection = document.querySelector('#report-form-section');
 const reportForm = document.querySelector('#report-form');
 const reportFormStatus = document.querySelector('#report-form-status');
+const evidenceInput = document.querySelector('#report-evidence');
+const evidenceSelectionStatus = document.querySelector('#report-evidence-selection');
+const evidenceSelectionList = document.querySelector('#report-evidence-list');
 const channelId = new URLSearchParams(location.search).get('channelId');
+let selectedEvidenceFiles = [];
+
+function renderEvidenceSelection() {
+  evidenceSelectionStatus.textContent = selectedEvidenceFiles.length
+    ? `${selectedEvidenceFiles.length} of 5 images selected.`
+    : 'No images selected.';
+  evidenceSelectionList.replaceChildren(...selectedEvidenceFiles.map((file, index) => {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.textContent = 'Remove';
+    removeButton.setAttribute('aria-label', `Remove ${file.name}`);
+    removeButton.addEventListener('click', () => {
+      selectedEvidenceFiles.splice(index, 1);
+      renderEvidenceSelection();
+    });
+    item.append(name, removeButton);
+    return item;
+  }));
+}
+
+evidenceInput.addEventListener('change', () => {
+  const incomingFiles = Array.from(evidenceInput.files);
+  const remainingSlots = 5 - selectedEvidenceFiles.length;
+  selectedEvidenceFiles.push(...incomingFiles.slice(0, remainingSlots));
+  evidenceInput.value = '';
+  renderEvidenceSelection();
+
+  if (incomingFiles.length > remainingSlots) {
+    evidenceSelectionStatus.textContent = 'Only 5 images can be attached to one report.';
+  }
+});
 
 async function loadUser() {
   const response = await fetch('/api/users/me');
@@ -100,13 +137,60 @@ function createReportItem(report) {
   created.className = 'report-date';
   created.textContent = new Date(report.createdAt).toLocaleString();
   item.append(channel, reason, description, status, created);
-  if (report.evidenceUrl) {
-    const evidence = document.createElement('a');
-    evidence.href = report.evidenceUrl;
-    evidence.target = '_blank';
-    evidence.rel = 'noopener';
-    evidence.textContent = 'View evidence image';
-    item.append(evidence);
+  const evidenceUrls = Array.isArray(report.evidenceUrls)
+    ? report.evidenceUrls
+    : report.evidenceUrl
+      ? [report.evidenceUrl]
+      : [];
+  if (evidenceUrls.length > 0) {
+    const evidenceLinks = document.createElement('div');
+    evidenceLinks.className = 'report-evidence';
+    evidenceUrls.forEach((url) => {
+      if (typeof url !== 'string') return;
+      const evidence = document.createElement('a');
+      evidence.href = url;
+      evidence.textContent = url;
+      evidence.setAttribute('aria-expanded', 'false');
+      const preview = document.createElement('img');
+      preview.alt = 'Report evidence';
+      preview.style.display = 'none';
+      const previewError = document.createElement('p');
+      previewError.className = 'form-status';
+      previewError.hidden = true;
+      previewError.textContent = 'Could not load this image.';
+      let imageRequested = false;
+      let imageFailed = false;
+      preview.addEventListener('error', () => {
+        imageFailed = true;
+        preview.style.display = 'none';
+        previewError.hidden = false;
+        evidence.setAttribute('aria-expanded', 'false');
+      });
+      evidence.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (preview.style.display !== 'none') {
+          preview.style.display = 'none';
+          evidence.setAttribute('aria-expanded', 'false');
+          return;
+        }
+
+        if (imageFailed) {
+          previewError.hidden = false;
+          return;
+        }
+
+        previewError.hidden = true;
+        preview.style.display = 'block';
+        evidence.setAttribute('aria-expanded', 'true');
+        if (!imageRequested) {
+          imageRequested = true;
+          preview.src = url;
+        }
+      });
+      evidenceLinks.append(evidence);
+      evidenceLinks.append(preview, previewError);
+    });
+    item.append(evidenceLinks);
   }
 
   const editButton = document.createElement('button');
@@ -196,22 +280,11 @@ async function submitReport(event) {
   formData.append('reason', document.querySelector('#report-reason').value);
   formData.append('description', document.querySelector('#report-description').value);
 
-  // TODO v4.5 4:
-  // Completa el nombre del campo utilizado para enviar la imagen.
-  // Objetivo: relacionar el archivo del formulario con upload.single().
-  // Resultado esperado: Multer reconocerá la evidencia enviada por el navegador.
-  const evidenceFiles =
-    document.querySelector('#report-evidence').files;
-  
-  for (const file of evidenceFiles) {
+  for (const file of selectedEvidenceFiles) {
     formData.append('evidence', file);
   }
 
   reportFormStatus.textContent = 'Submitting report…';
-  // TODO v4.5 5:
-  // Completa el body de la petición utilizando el FormData construido.
-  // Objetivo: enviar los campos de texto y la evidencia en una misma solicitud.
-  // Resultado esperado: POST /api/reports recibirá correctamente multipart/form-data.
   const response = await fetch('/api/reports', {
     method: 'POST',
     body: formData
@@ -223,6 +296,8 @@ async function submitReport(event) {
   }
 
   reportForm.reset();
+  selectedEvidenceFiles = [];
+  renderEvidenceSelection();
   reportFormStatus.textContent = 'Report saved.';
   await loadReports();
 }

@@ -78,16 +78,22 @@ test('an authenticated user can create and list a report', async () => {
   expect(listed.body.reports[0].channelId).toEqual(expect.objectContaining({ name: 'Report Channel' }));
 });
 
-test('an image evidence file is stored and exposed through its URL', async () => {
+test('image evidence files are stored and exposed through their URLs', async () => {
   const agent = await registerAgent('image@example.com');
   const created = await agent.post('/api/reports').field({
     channelId,
     reason: 'VIDEO_PROBLEM',
     description: 'The image is frozen.'
-  }).attach('evidence', Buffer.from('image evidence'), { filename: 'evidence.png', contentType: 'image/png' }).expect(201);
+  })
+    .attach('evidence', Buffer.from('first image'), { filename: 'evidence.png', contentType: 'image/png' })
+    .attach('evidence', Buffer.from('second image'), { filename: 'evidence-two.png', contentType: 'image/png' })
+    .expect(201);
 
-  expect(created.body.report.evidenceUrl).toMatch(/^\/uploads\/reports\/.+\.png$/);
-  await request(app).get(created.body.report.evidenceUrl).expect(200);
+  expect(created.body.report.evidenceUrls).toHaveLength(2);
+  for (const evidenceUrl of created.body.report.evidenceUrls) {
+    expect(evidenceUrl).toMatch(/^\/uploads\/reports\/.+\.png$/);
+    await request(app).get(evidenceUrl).expect(200);
+  }
 });
 
 test('reports reject invalid report data and invalid files', async () => {
